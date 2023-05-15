@@ -1,14 +1,10 @@
 %initialize vectors
-%%
 se = zeros(23,30);
-%K = zeros(23,100);
 M = zeros(23, 100);
-%K = zeros(23, 100);
-%L = zeros(23, 100);
 y2 = zeros(23,20);
 y = zeros(23,20);
 %access port and manipulate t get the start frame
-%s = serialport("COM3", 3000000, "Timeout", 10);
+s = serialport("COM3", 3000000, "Timeout", 10);
 data = read(s, 100, "uint8");
 ind = find(data == 255, 1);
 rem = 100-ind;
@@ -23,8 +19,6 @@ getRem = read(s,gr,"uint8");
 for i=1:11
     NWT = read(s,750,"uint8");
     mb = make_buffer(NWT);
-    %M(:,1:10)=mb(:,:);
-    %M = circshift(M, [0,-10]);
     %shift it every time we get new frame of 750 elements
     se(:,1:10) = mb;
     se = circshift(se, [0,-10]);
@@ -32,13 +26,10 @@ for i=1:11
     
     %filters
     y = filter([0.85,0,0.85],[1,0,0.7],se);
-    %K(:,1:10)=y(:,11:20);
-    %K = circshift(M, [0,-10]);
     
     y2 = filter([0.8,0.8],[1,0.6],y);
     M(:,1:10)=y2(:,11:20);
     M = circshift(M, [0,-10]);
-    %final filter
 end
 y_filtered = highpass(M, 0.5, 500,Steepness=0.5,StopbandAttenuation=30);
 
@@ -62,7 +53,7 @@ y_filtered = highpass(M, 0.5, 500,Steepness=0.5,StopbandAttenuation=30);
     xlabel('t','Color','black');
 
 
-%%
+
 
 
 
