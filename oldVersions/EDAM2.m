@@ -1,4 +1,4 @@
-classdef EDAM < handle
+classdef EDAM2 < handle
     events
         ImpedanceDataEvent
     end
@@ -21,7 +21,7 @@ classdef EDAM < handle
     end
 
     methods
-        function obj = EDAM(portName) 
+        function obj = EDAM2(portName) %edam_c
             % Construct an instance of this class, it initializes the port and
             % app object and then calls the initializePort function if
             % possible.
@@ -41,7 +41,7 @@ classdef EDAM < handle
                 obj.serial_port = serialport(portName, 3000000, "Timeout", 10);
                 disp("Serial port object created successfully");
                 % % to disable the impedance check ------------------------
-                write(obj.serial_port, 18, "uint8")
+                % write(obj.serial_port, 18, "uint8")
                 % get start of frame
                 data2 = read(obj.serial_port, 100, "uint8");
                 ind = find(data2 == 255, 1);
@@ -75,10 +75,11 @@ classdef EDAM < handle
                 obj.setPause = false;
                 tic
                 while iteration <= 10 && obj.isRunning && ~obj.setPause
+                    % prepareForFilters = zeros(23, 150);
                     obj.oneSecondArray = zeros(23, 500);
 
                     for i = 1:10
-                        obj.oneTenthOfSecondArray = [];
+                        % obj.oneTenthOfSecondArray = [];
                         while size(obj.oneTenthOfSecondArray,2) < 3750
                             if isempty(obj.serial_port) || ~isvalid(obj.serial_port)
                                 error('Serial port object is not valid or properly initialized.');
@@ -109,18 +110,20 @@ classdef EDAM < handle
                             end
 
                             %get impedences
-                            % if obj.ImpedanceFlag == true
-                            %     makeBuffer_reshaped = reshape(makeBuffer(:, 1:8), [], 2, 4); % Reshape mb into a 23x2x4 array
-                            %     diff_1 = abs(makeBuffer_reshaped(:, :, 1) - makeBuffer_reshaped(:, :, 3)) / 2;
-                            %     diff_2 = abs(makeBuffer_reshaped(:, :, 2) - makeBuffer_reshaped(:, :, 4)) / 2;
-                            %     extractImpedances = max(diff_1, diff_2);
-                            %     extractImpedances = extractImpedances * 265000000;
-                            %     obj.ImpedanceValues = mean(extractImpedances, 2); % Compute row-wise average (along dimension 2)
-                            %     obj.ImpedanceValues = squeeze(obj.ImpedanceValues); % Remove singleton dimensions if any
-                            %     obj.ImpedanceValues = obj.ImpedanceValues(1:end-2);
-                            % end
+                            if obj.ImpedanceFlag == true
+                                makeBuffer_reshaped = reshape(makeBuffer(:, 1:8), [], 2, 4); % Reshape mb into a 23x2x4 array
+                                diff_1 = abs(makeBuffer_reshaped(:, :, 1) - makeBuffer_reshaped(:, :, 3)) / 2;
+                                diff_2 = abs(makeBuffer_reshaped(:, :, 2) - makeBuffer_reshaped(:, :, 4)) / 2;
+                                extractImpedances = max(diff_1, diff_2);
+                                extractImpedances = extractImpedances * 265000000;
+                                obj.ImpedanceValues = mean(extractImpedances, 2); % Compute row-wise average (along dimension 2)
+                                obj.ImpedanceValues = squeeze(obj.ImpedanceValues); % Remove singleton dimensions if any
+                                obj.ImpedanceValues = obj.ImpedanceValues(1:end-2);
+                            end
 
                             result = makeBuffer - obj.subtract;
+                            % prepareForFilters(:, 1:50) = makeBuffer;
+                            % prepareForFilters = circshift(prepareForFilters, [0, -50]);
                             obj.firstFiterArray = filter([0.85, 0, 0.85], [1, 0, 0.7], result, [], 2);
                             obj.secondFiterArray = filter([0.8, 0.8], [1, 0.6], obj.firstFiterArray, [], 2);
                             obj.oneSecondArray(:, 1:50) = obj.secondFiterArray;
@@ -140,7 +143,7 @@ classdef EDAM < handle
                 end
                 toc
                 disp("end")
-                obj.finalFiterArray = highpass((obj.oneSecondArray)', 0.5, 500); 
+                obj.finalFiterArray = highpass((obj.oneSecondArray)', 0.5, 500); %, 'Steepness', 0.8, 'StopbandAttenuation', 30);
                 obj.finalFiterArray = (obj.finalFiterArray)';
                 if obj.getImpedances 
                     notify(obj, 'ImpedanceDataEvent');
