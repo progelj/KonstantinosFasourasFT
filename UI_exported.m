@@ -39,9 +39,9 @@ classdef UI_exported < matlab.apps.AppBase
                 ];
         saved_flag = false;
         step
-        displayBuffer
+        displayBuffer = zeros(23,1500);
         distancesBetweenChannels
-        newBuffer
+        newBuffer 
         output_array
     end
 
@@ -55,7 +55,8 @@ classdef UI_exported < matlab.apps.AppBase
             % frameAcquisition from EDAM in order to extract the new data
             % from the EEG device. Then it concatenates data worth up to 3
             % seconds and displays them.
-            app.displayBuffer = [];
+            
+            % app.displayBuffer = [];
             plot(app.UIAxes, app.displayBuffer);
             xlim(app.UIAxes, [0 1500]); 
 
@@ -80,11 +81,14 @@ classdef UI_exported < matlab.apps.AppBase
                 
                 tic
                 app.newBuffer = app.output_array + app.distancesBetweenChannels;
-                app.displayBuffer = [app.displayBuffer, app.newBuffer];
-
-                if size(app.displayBuffer, 2) > 1500
-                    app.displayBuffer = app.displayBuffer(:, end-1500:end);
-                end
+                app.displayBuffer(:, 1:500) = app.newBuffer;
+                app.displayBuffer = circshift(app.displayBuffer, [0, -500]);
+                
+                % app.displayBuffer = [app.displayBuffer, app.newBuffer];
+                % 
+                % if size(app.displayBuffer, 2) > 1500
+                %     app.displayBuffer = app.displayBuffer(:, end-1500:end);
+                % end
                 
                 pause(0.8);
                 plot(app.UIAxes, app.displayBuffer');
@@ -219,7 +223,12 @@ classdef UI_exported < matlab.apps.AppBase
             set(app.ImpedancesoffButton, 'Enable', 'on')
             set(app.StartAcquisitionButton, 'Enable', 'off')
             
+            if isempty(app.EDAMP) || ~isa(app.EDAMP, 'EDAM') || ~app.EDAMP.portInitialized
+                app.EDAMP = EDAM("COM3"); ..."COM3"
+            end
+
             addlistener(app.EDAMP, 'ImpedanceDataEvent', @(src, event) plotImpedanceData(app, src, event));
+
             if ~app.EDAMP.WhileRunning
                 app.EDAMP.WhileRunning = true;
                 app.EDAMP.setPause = false;
@@ -304,6 +313,8 @@ classdef UI_exported < matlab.apps.AppBase
             app.MakeConnectionButton.ButtonPushedFcn = createCallbackFcn(app, @MakeConnectionButtonPushed, true);
             app.MakeConnectionButton.FontName = 'Arial';
             app.MakeConnectionButton.FontSize = 18;
+            app.MakeConnectionButton.Enable = 'off';
+            app.MakeConnectionButton.Visible = 'off';
             app.MakeConnectionButton.Position = [982 743 166 31];
             app.MakeConnectionButton.Text = 'Make Connection';
 
@@ -321,7 +332,6 @@ classdef UI_exported < matlab.apps.AppBase
             app.StartAcquisitionButton.ButtonPushedFcn = createCallbackFcn(app, @StartAcquisitionButtonPushed, true);
             app.StartAcquisitionButton.FontName = 'Arial';
             app.StartAcquisitionButton.FontSize = 18;
-            app.StartAcquisitionButton.Enable = 'off';
             app.StartAcquisitionButton.Position = [982 684 166 31];
             app.StartAcquisitionButton.Text = 'Start Acquisition';
 

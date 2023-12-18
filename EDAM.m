@@ -10,11 +10,12 @@ classdef EDAM < handle
         getImpedances = false;
         serial_port = [];
         ImpedanceValues
-        finalFiterArray = [];
+        finalFiterArray = zeros(23, 500);
         oneSecondArray = zeros(23, 500);
-        oneTenthOfSecondArray =[]
-        secondFiterArray = zeros(23, 100);
-        firstFiterArray = zeros(23, 100);
+        oneTenthOfSecondArray =zeros(1,3750);
+        secondFiterArray = zeros(23, 50);
+        firstFiterArray = zeros(23, 50);
+        prepareForFilters = zeros(23, 150);
         save_flag = false
         subtract
         ImpedanceFlag = false
@@ -59,7 +60,11 @@ classdef EDAM < handle
             else
                 error('Serial port object is already initialized.');
             end
-            
+            obj.flushSerialPort();
+        end
+
+        function flushSerialPort(obj)
+            flush(obj.serial_port);
         end
 
         function output_array = frameAcquisition(obj)
@@ -75,18 +80,19 @@ classdef EDAM < handle
                 obj.setPause = false;
                 tic
                 while iteration <= 10 && obj.isRunning && ~obj.setPause
-                    obj.oneSecondArray = zeros(23, 500);
+                    % obj.oneSecondArray = zeros(23, 500);
 
                     for i = 1:10
-                        obj.oneTenthOfSecondArray = [];
-                        while size(obj.oneTenthOfSecondArray,2) < 3750
+                        obj.oneTenthOfSecondArray = zeros(1,3750);
+                        while obj.oneTenthOfSecondArray(1,1) == 0
                             if isempty(obj.serial_port) || ~isvalid(obj.serial_port)
                                 error('Serial port object is not valid or properly initialized.');
                             end
 
                             oneFrame = read(obj.serial_port, 75, "uint8");
-                            if (oneFrame(1) == 255 && oneFrame(75) == 0)
-                                obj.oneTenthOfSecondArray = [obj.oneTenthOfSecondArray, oneFrame];
+                            if (oneFrame(1) == 255) 
+                                obj.oneTenthOfSecondArray(:, 1:75) = oneFrame;
+                                obj.oneTenthOfSecondArray = circshift(obj.oneTenthOfSecondArray, [0, -75]);
                             else
                                 idx = find(oneFrame == 255, 1);
                                 rem2 = 75 - idx;
@@ -96,37 +102,39 @@ classdef EDAM < handle
                                 end
                                 read(obj.serial_port, grr, "uint8");
                             end
-                            if size(obj.oneTenthOfSecondArray, 2) == 3750
-                                break;
-                            end
                         end
-                        if size(obj.oneTenthOfSecondArray, 2) == 3750
-                            disp("Frame acquired successfully");
-                            makeBuffer = obj.make_buffer(obj.oneTenthOfSecondArray);
-                            if ~obj.save_flag
-                                obj.subtract = makeBuffer(:,1);
-                                obj.save_flag = true;
-                            end
 
-                            %get impedences
-                            % if obj.ImpedanceFlag == true
-                            %     makeBuffer_reshaped = reshape(makeBuffer(:, 1:8), [], 2, 4); % Reshape mb into a 23x2x4 array
-                            %     diff_1 = abs(makeBuffer_reshaped(:, :, 1) - makeBuffer_reshaped(:, :, 3)) / 2;
-                            %     diff_2 = abs(makeBuffer_reshaped(:, :, 2) - makeBuffer_reshaped(:, :, 4)) / 2;
-                            %     extractImpedances = max(diff_1, diff_2);
-                            %     extractImpedances = extractImpedances * 265000000;
-                            %     obj.ImpedanceValues = mean(extractImpedances, 2); % Compute row-wise average (along dimension 2)
-                            %     obj.ImpedanceValues = squeeze(obj.ImpedanceValues); % Remove singleton dimensions if any
-                            %     obj.ImpedanceValues = obj.ImpedanceValues(1:end-2);
-                            % end
-
-                            result = makeBuffer - obj.subtract;
-                            obj.firstFiterArray = filter([0.85, 0, 0.85], [1, 0, 0.7], result, [], 2);
-                            obj.secondFiterArray = filter([0.8, 0.8], [1, 0.6], obj.firstFiterArray, [], 2);
-                            obj.oneSecondArray(:, 1:50) = obj.secondFiterArray;
-                            obj.oneSecondArray = circshift(obj.oneSecondArray, [0, -50]);
+                        if (obj.oneTenthOfSecondArray(1,1:15) == 0)
+                            disp("Frame NOT acquired successfully");
 
                         end
+
+                        makeBuffer = obj.make_buffer(obj.oneTenthOfSecondArray);
+                        if ~obj.save_flag
+                            obj.subtract = makeBuffer(:,1);
+                            obj.save_flag = true;
+                        end
+
+                        %get impedences
+                        % if obj.ImpedanceFlag == true
+                        %     makeBuffer_reshaped = reshape(makeBuffer(:, 1:8), [], 2, 4); % Reshape mb into a 23x2x4 array
+                        %     diff_1 = abs(makeBuffer_reshaped(:, :, 1) - makeBuffer_reshaped(:, :, 3)) / 2;
+                        %     diff_2 = abs(makeBuffer_reshaped(:, :, 2) - makeBuffer_reshaped(:, :, 4)) / 2;
+                        %     extractImpedances = max(diff_1, diff_2);
+                        %     extractImpedances = extractImpedances * 265000000;
+                        %     obj.ImpedanceValues = mean(extractImpedances, 2); % Compute row-wise average (along dimension 2)
+                        %     obj.ImpedanceValues = squeeze(obj.ImpedanceValues); % Remove singleton dimensions if any
+                        %     obj.ImpedanceValues = obj.ImpedanceValues(1:end-2);
+                        % end
+
+                        result = makeBuffer - obj.subtract;
+                        obj.prepareForFilters(:, 1:50) = result;
+                        obj.prepareForFilters = circshift(obj.prepareForFilters, [0, -50]);
+                        obj.firstFiterArray = filter([0.85, 0, 0.85], [1, 0, 0.7], obj.prepareForFilters(:,51:100), [], 2);
+                        obj.secondFiterArray = filter([0.8, 0.8], [1, 0.6], obj.firstFiterArray, [], 2);
+                        obj.oneSecondArray(:, 1:50) = obj.secondFiterArray;
+                        obj.oneSecondArray = circshift(obj.oneSecondArray, [0, -50]);
+
                         pause(0.1 - toc)
                         if ~obj.isRunning || obj.setPause
                             obj.isRunning = false;
