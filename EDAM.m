@@ -19,10 +19,12 @@ classdef EDAM < handle
         save_flag = false
         subtract
         ImpedanceFlag = false
+        idx
+        idx2
     end
 
     methods
-        function obj = EDAM(portName) 
+        function obj = EDAM(portName) %edam_cc
             % Construct an instance of this class, it initializes the port and
             % app object and then calls the initializePort function if
             % possible.
@@ -90,17 +92,22 @@ classdef EDAM < handle
                             end
 
                             oneFrame = read(obj.serial_port, 75, "uint8");
-                            if (oneFrame(1) == 255) 
+                            obj.idx = find(oneFrame == 255);
+                            % check if frame is of correct format
+                            if (oneFrame(1) == 255 && size(obj.idx,2) == 1) 
                                 obj.oneTenthOfSecondArray(:, 1:75) = oneFrame;
                                 obj.oneTenthOfSecondArray = circshift(obj.oneTenthOfSecondArray, [0, -75]);
                             else
-                                idx = find(oneFrame == 255, 1);
-                                rem2 = 75 - idx;
-                                grr = 75-rem2-1;
-                                if(grr == 0)
-                                    grr = 75;
+                                if size(obj.idx,2)>1
+                                    oneFrame(obj.idx(2:end)) = bitset(oneFrame(obj.idx(2:end)), 1, 0);
                                 end
-                                read(obj.serial_port, grr, "uint8");
+                                obj.idx2 = find(oneFrame == 255);
+                                if (oneFrame(1) == 255 && size(obj.idx2,2) == 1) 
+                                    obj.oneTenthOfSecondArray(:, 1:75) = oneFrame;
+                                    obj.oneTenthOfSecondArray = circshift(obj.oneTenthOfSecondArray, [0, -75]);
+                                else
+                                    disp("error")
+                                end
                             end
                         end
 
@@ -179,34 +186,36 @@ classdef EDAM < handle
         function mb = make_buffer(obj, A)
             % this method gets the extracted data from the eeg device ad
             % constructs the channels.
+            
+            % A=uint8(A);
             index = find(A == 255);
             locate_69_B = bsxfun(@plus, index.', 2:70);
             extract_69_B = ismember(1:numel(A), locate_69_B(:));
-
             temp_array = A(extract_69_B);
+
             MSB = temp_array(1,1:3:end);
             binaryBuffer = dec2bin(MSB, 8); % Convert to binary (8 bits)
-            sevenBitsMSB = binaryBuffer(:, 1:7); % Extract 7 most significant bits
-            MSB7 = bin2dec(sevenBitsMSB); % Convert back to decimal
-            indices_to_convert = MSB7 >= 64 & MSB7 <= 127;
-            MSB7(indices_to_convert) = -(127 - MSB7(indices_to_convert) );
+            %sevenBitsMSB = binaryBuffer(:, 1:7); % Extract 7 most significant bits
+            MSB8 = bin2dec(binaryBuffer); % Convert back to decimal
+            indices_to_convert = MSB8 >= 128 & MSB8 <= 255;
+            MSB8(indices_to_convert) = -(255 - MSB8(indices_to_convert) );
 
             LSB2 = temp_array(1,2:3:end);
             binaryBuffer2 = dec2bin(LSB2, 8);
-            sevenBitsLSB2 = binaryBuffer2(:, 1:7); % Extract 7 most significant bits
-            LSB27 = bin2dec(sevenBitsLSB2); % Convert back to decimal
-            LSB27(indices_to_convert) = - (127 - LSB27(indices_to_convert) ); % 2's complement
-            
+            % sevenBitsLSB2 = binaryBuffer2(:, 1:7); % Extract 7 most significant bits
+            LSB28 = bin2dec(binaryBuffer2); % Convert back to decimal
+            LSB28(indices_to_convert) = - (255 - LSB28(indices_to_convert) ); % 2's complement
+
             LSB1 = temp_array(1,3:3:end);
             binaryBuffer3 = dec2bin(LSB1, 8);
-            sevenBitsLSB1 = binaryBuffer3(:, 1:7); % Extract 7 most significant bits
-            LSB17 = bin2dec(sevenBitsLSB1); % Convert back to decimal
-            LSB17(indices_to_convert) = - (127 - LSB17(indices_to_convert) + 1); % 2's complement
-            
-            MSB7 = (MSB7/2).*2^14;
-            LSB27 = (LSB27/2).*2^7;
-            LSB17 = (LSB17/2);
-            channel_array = MSB7+LSB27+LSB17;
+            % sevenBitsLSB1 = binaryBuffer3(:, 1:7); % Extract 7 most significant bits
+            LSB18= bin2dec(binaryBuffer3); % Convert back to decimal
+            LSB18(indices_to_convert) = - (255 - LSB18(indices_to_convert) + 1); % 2's complement
+
+            MSB8 = (MSB8/2).*2^14;
+            LSB28 = (LSB28/2).*2^7;
+            LSB18 = (LSB18/2);
+            channel_array = MSB8+LSB28+LSB18;
             channel_array = channel_array*2^3;
             channel_array = channel_array*(5/3)*(1/2^32);
 
