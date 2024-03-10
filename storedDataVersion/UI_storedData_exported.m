@@ -37,56 +37,93 @@ classdef UI_storedData_exported < matlab.apps.AppBase
                 0.08, 0.5;   % A1
                 0.92, 0.5    % A2
                 ];
-        saved_flag = false;
-        step
         output_array
-        displayBuffer
+        saved_flag = false;
+        step=1;
+        displayBuffer = zeros(23,1500);
+        distancesBetweenChannels=[];
         index = 1;
+        newBuffer
+        zf = [];
+        % window_size = 10;  
+        % overlap = 0.25;
     end
 
     properties (Access = private)
         EDAMP
     end
-   
     methods (Access = private)
-        
-        function plotSignalData(app) 
-            app.displayBuffer = [];
+
+        function plotSignalData(app)
             plot(app.UIAxes, app.displayBuffer);
-            xlim(app.UIAxes, [0 1500]); 
+            xlim(app.UIAxes, [0 1500]);
 
             variables={'f7','fp1','fp2','f8','f3','fz','f4','c3','cz','p8','p7','pz','p4','t3','p3','o1','o2','c4','t4','a2','ac1','ac2','ac3'};
-            
 
             xline(app.UIAxes, 500, '--');
             xline(app.UIAxes, 1000, '--');
-            
-            app.EDAMP.isRunning = true;
-            app.output_array = app.EDAMP.frameAcquisition();
 
-            while app.EDAMP.WhileRunning && ~app.EDAMP.setPause 
+            while app.EDAMP.WhileRunning && ~app.EDAMP.setPause
                 tic
-                if ~app.saved_flag
-                    app.step = max(app.output_array(:));
-                    app.saved_flag = true;
+                app.index = app.index + 500;
+                if (app.index >= app.EDAMP.end_frame)
+                    disp("End of procedure")
+                    beep
+                    break
                 end
-                distancesBetweenChannels = 0:app.step:app.step*22;
-                distancesBetweenChannels = distancesBetweenChannels';
+                app.EDAMP.loadData();
+                app.output_array = app.EDAMP.constructBuffer();
 
-                newBuffer = app.output_array(:, app.index:app.index+499) + distancesBetweenChannels;
+                preprocessedBuffer = zeros(23, 500);
+                for i = 1:23
+                    sensorData = app.output_array(i, :);
+                    % 
+                    detrended_data = detrend(sensorData);
 
-                app.displayBuffer = [app.displayBuffer, newBuffer];
+                    minVal = min(detrended_data);
+                    maxVal = max(detrended_data);
+                    plotRange = maxVal - minVal;
 
-                if size(app.displayBuffer, 2) > 1500
-                    app.displayBuffer = app.displayBuffer(:, end-1500:end);
+                    rescaledData = (detrended_data - minVal) / plotRange *2 - 1;
+
+                    preprocessedBuffer(i, :) = rescaledData;
                 end
                 
+                fs = 500;
+                cutFreq = 45; 
+                filterOrder = 3;
+                passband_ripple = 0.5;
+                Wn = (2 * cutFreq) / fs; 
+                [bL, aL] = cheby1(filterOrder, passband_ripple, Wn, 'low');
+
+                sectionSize = 500; 
+                out = zeros(size(preprocessedBuffer));               
+
+                for i = 0:size(preprocessedBuffer, 2) / sectionSize - 1
+                    range = i * sectionSize + 1 : (i + 1) * sectionSize; 
+                    in = preprocessedBuffer(:, range);
+                    [out(:, range), app.zf] = filter(bL, aL, in, app.zf, 2);
+                end
+
+                output = out;
+
+                if ~app.saved_flag
+                    app.step = max(output(:));
+                    app.saved_flag = true;
+                    app.distancesBetweenChannels = 0:app.step:app.step*22;
+                    app.distancesBetweenChannels = app.distancesBetweenChannels';
+                end
+
+                app.newBuffer = output + app.distancesBetweenChannels;
+                app.displayBuffer(:, 1:500) = app.newBuffer;
+                app.displayBuffer = circshift(app.displayBuffer, [0, -500]);
+
                 pause(0.8);
                 plot(app.UIAxes, app.displayBuffer');
-                yticks(app.UIAxes, distancesBetweenChannels);
+                yticks(app.UIAxes, app.distancesBetweenChannels);
                 yticklabels(app.UIAxes, variables);
                 xticks(app.UIAxes, linspace(0, 1500, 4));
-                xticklabels(app.UIAxes, 0:5);
+                xticklabels(app.UIAxes, 0:4);
                 xline(app.UIAxes, 500, '--');
                 xline(app.UIAxes, 1000, '--');
 
@@ -98,11 +135,6 @@ classdef UI_storedData_exported < matlab.apps.AppBase
                 end
                 toc
                 pause(0.1);
-                app.index = app.index + 500;
-                if (app.index >= size(app.EDAMP.secondFiterArray,2))
-                    disp("End of procedure")
-                    break
-                end
             end
         end
 
@@ -114,7 +146,7 @@ classdef UI_storedData_exported < matlab.apps.AppBase
             cla(app.UIAxes2);
 
             ImpedanceValuesUI = src.ImpedanceValues;
-            colors = zeros(size(app.Sensors, 1), 3); 
+            colors = zeros(size(app.Sensors, 1), 3);
 
             for i = 1:size(app.Sensors, 1)
                 if i <= numel(ImpedanceValuesUI) && ImpedanceValuesUI(i) < 2500
@@ -126,20 +158,6 @@ classdef UI_storedData_exported < matlab.apps.AppBase
                 end
             end
 
-            % % Define conditions
-            % % condition1 = app.EDAMP.ImpedanceValues < 2500;
-            % % condition2 = app.EDAMP.ImpedanceValues > 5000;
-            % condition1 = ImpedanceValuesUI < 2500;
-            % condition2 = ImpedanceValuesUI > 5000;
-            % 
-            % % Set colors based on conditions
-            % colors(condition1, :) = [0, 0.5, 0];  % Dark green
-            % colors(condition2, :) = [1, 0, 0];    % Red
-            % 
-            % % Default color (light green)
-            % default_color = [0.5, 0.8, 0.5];
-            % colors(~(condition1 | condition2), :) = default_color;
-
             scatter(app.UIAxes2, app.Sensors(:, 1), app.Sensors(:, 2), 200, colors, 'filled');
 
             xlabel(app.UIAxes2, ' ');
@@ -149,7 +167,7 @@ classdef UI_storedData_exported < matlab.apps.AppBase
             xlim(app.UIAxes2, [0 1]);
             ylim(app.UIAxes2, [0 1]);
         end
-        
+
         function clearAxis (app)
             % this function clears the plot responsible for displaying
             % the impedances
@@ -164,19 +182,16 @@ classdef UI_storedData_exported < matlab.apps.AppBase
 
         % Button pushed function: MakeConnectionButton
         function MakeConnectionButtonPushed(app, event)
-            
-            if isempty(app.EDAMP) || ~isa(app.EDAMP, 'EDAM_storedData') || ~app.EDAMP.portInitialized
-                app.EDAMP = EDAM_storedData('20231016-data3-impOFF.mat');
-                
-            end
-
-            set(app.StartAcquisitionButton, 'Enable', 'on')
-            set(app.MakeConnectionButton, 'Enable', 'off')
+            % if isempty(app.EDAMP) || ~isa(app.EDAMP, 'MyClass5') || ~app.EDAMP.portInitialized
+            %     app.EDAMP = MyClass5('data5.mat');
+            % end
+            % 
+            % set(app.StartAcquisitionButton, 'Enable', 'on')
+            % set(app.MakeConnectionButton, 'Enable', 'off')
         end
 
         % Button pushed function: PauseAcquisitionButton
         function PauseAcquisitionButtonPushed(app, event)
-            app.EDAMP.isRunning = false;
             app.EDAMP.WhileRunning = false;
             disp('Paused');
             app.EDAMP.pauseAcquisition();
@@ -187,10 +202,16 @@ classdef UI_storedData_exported < matlab.apps.AppBase
 
         % Button pushed function: StartAcquisitionButton
         function StartAcquisitionButtonPushed(app, event)
+            if isempty(app.EDAMP) || ~isa(app.EDAMP, '20240217-data1') || ~app.EDAMP.portInitialized
+                app.EDAMP = EDAM_storedData('20240217-data1');
+                % 20231016-data3-impOFF BigData11  20240217-data3
+            end
+
             addlistener(app.EDAMP, 'myEvent', @(src, event) plotImpedanceData(app, src, event));
             set(app.PauseAcquisitionButton, 'Enable', 'on')
-            % set(app.ImpedancesonButton, 'Enable', 'on')
             set(app.StartAcquisitionButton, 'Enable', 'off')
+            set(app.ImpedancesoffButton, 'Enable', 'on')
+            set(app.ImpedancesonButton, 'Enable', 'on')
 
             if ~app.EDAMP.WhileRunning
                 app.EDAMP.WhileRunning = true;
@@ -209,12 +230,10 @@ classdef UI_storedData_exported < matlab.apps.AppBase
             
             set(app.ImpedancesoffButton, 'Enable', 'on')
             set(app.ImpedancesonButton, 'Enable', 'off')
-            
         end
 
         % Button pushed function: StopAcquisitionButton
         function StopAcquisitionButtonPushed(app, event)
-            app.EDAMP.isRunning = false;
             app.EDAMP.WhileRunning = false;
             disp('Terminated Connection');
             %app.EDAMP.delete();
@@ -237,7 +256,6 @@ classdef UI_storedData_exported < matlab.apps.AppBase
 
             set(app.ImpedancesonButton, 'Enable', 'on')
             set(app.ImpedancesoffButton, 'Enable', 'off')
-        
         end
     end
 
@@ -261,7 +279,7 @@ classdef UI_storedData_exported < matlab.apps.AppBase
             app.UIAxes.YTick = [];
             app.UIAxes.YTickLabel = '';
             app.UIAxes.FontSize = 12;
-            app.UIAxes.Position = [22 39 898 796];
+            app.UIAxes.Position = [22 44 799 791];
 
             % Create UIAxes2
             app.UIAxes2 = uiaxes(app.UIFigure);
@@ -271,14 +289,16 @@ classdef UI_storedData_exported < matlab.apps.AppBase
             zlabel(app.UIAxes2, 'Z')
             app.UIAxes2.XTick = [];
             app.UIAxes2.YTick = [];
-            app.UIAxes2.Position = [935 86 341 312];
+            app.UIAxes2.Position = [857 44 415 378];
 
             % Create MakeConnectionButton
             app.MakeConnectionButton = uibutton(app.UIFigure, 'push');
             app.MakeConnectionButton.ButtonPushedFcn = createCallbackFcn(app, @MakeConnectionButtonPushed, true);
             app.MakeConnectionButton.FontName = 'Arial';
             app.MakeConnectionButton.FontSize = 18;
-            app.MakeConnectionButton.Position = [1023 760 166 31];
+            app.MakeConnectionButton.Enable = 'off';
+            app.MakeConnectionButton.Visible = 'off';
+            app.MakeConnectionButton.Position = [982 743 166 31];
             app.MakeConnectionButton.Text = 'Make Connection';
 
             % Create PauseAcquisitionButton
@@ -287,7 +307,7 @@ classdef UI_storedData_exported < matlab.apps.AppBase
             app.PauseAcquisitionButton.FontName = 'Arial';
             app.PauseAcquisitionButton.FontSize = 18;
             app.PauseAcquisitionButton.Enable = 'off';
-            app.PauseAcquisitionButton.Position = [1023 639 166 31];
+            app.PauseAcquisitionButton.Position = [982 622 166 31];
             app.PauseAcquisitionButton.Text = 'Pause Acquisition';
 
             % Create StartAcquisitionButton
@@ -295,8 +315,7 @@ classdef UI_storedData_exported < matlab.apps.AppBase
             app.StartAcquisitionButton.ButtonPushedFcn = createCallbackFcn(app, @StartAcquisitionButtonPushed, true);
             app.StartAcquisitionButton.FontName = 'Arial';
             app.StartAcquisitionButton.FontSize = 18;
-            app.StartAcquisitionButton.Enable = 'off';
-            app.StartAcquisitionButton.Position = [1023 701 166 31];
+            app.StartAcquisitionButton.Position = [982 684 166 31];
             app.StartAcquisitionButton.Text = 'Start Acquisition';
 
             % Create ImpedancesonButton
@@ -304,7 +323,7 @@ classdef UI_storedData_exported < matlab.apps.AppBase
             app.ImpedancesonButton.ButtonPushedFcn = createCallbackFcn(app, @ImpedancesonButtonPushed, true);
             app.ImpedancesonButton.FontSize = 18;
             app.ImpedancesonButton.Enable = 'off';
-            app.ImpedancesonButton.Position = [1023 517 166 31];
+            app.ImpedancesonButton.Position = [984 499 166 31];
             app.ImpedancesonButton.Text = 'Impedances on';
 
             % Create StopAcquisitionButton
@@ -313,7 +332,7 @@ classdef UI_storedData_exported < matlab.apps.AppBase
             app.StopAcquisitionButton.FontName = 'Arial';
             app.StopAcquisitionButton.FontSize = 18;
             app.StopAcquisitionButton.Enable = 'off';
-            app.StopAcquisitionButton.Position = [1023 578 166 31];
+            app.StopAcquisitionButton.Position = [982 561 166 31];
             app.StopAcquisitionButton.Text = 'Stop Acquisition';
 
             % Create ImpedancesoffButton
@@ -321,7 +340,7 @@ classdef UI_storedData_exported < matlab.apps.AppBase
             app.ImpedancesoffButton.ButtonPushedFcn = createCallbackFcn(app, @ImpedancesoffButtonPushed, true);
             app.ImpedancesoffButton.FontSize = 18;
             app.ImpedancesoffButton.Enable = 'off';
-            app.ImpedancesoffButton.Position = [1023 458 166 31];
+            app.ImpedancesoffButton.Position = [984 437 166 31];
             app.ImpedancesoffButton.Text = 'Impedances off';
 
             % Show the figure after all components are created

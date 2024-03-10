@@ -37,60 +37,79 @@ classdef UI_exported < matlab.apps.AppBase
                 0.08, 0.5;   % A1
                 0.92, 0.5    % A2
                 ];
+        output_array
         saved_flag = false;
         step
         displayBuffer = zeros(23,1500);
         distancesBetweenChannels
-        newBuffer 
-        output_array
+        newBuffer
+        zf = [];
     end
 
     properties (Access = private)
         EDAMP
-    end 
+    end
     methods (Access = private)
         
-        function plotSignalData (app)
-            % this function runs every second and calls the
-            % frameAcquisition from EDAM in order to extract the new data
-            % from the EEG device. Then it concatenates data worth up to 3
-            % seconds and displays them.
-            
-            % app.displayBuffer = [];
+        function plotSignalData(app) 
             plot(app.UIAxes, app.displayBuffer);
             xlim(app.UIAxes, [0 1500]); 
 
             variables={'f7','fp1','fp2','f8','f3','fz','f4','c3','cz','p8','p7','pz','p4','t3','p3','o1','o2','c4','t4','a2','ac1','ac2','ac3'};
-            % distancesBetweenChannels = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.11, 0.12, 0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.2, 0.21, 0.22, 0.23];
-            % %D = 0.0005:0.0005:0.0115;
-            % distancesBetweenChannels = distancesBetweenChannels';
-
+            
             xline(app.UIAxes, 500, '--');
             xline(app.UIAxes, 1000, '--');
             
             while app.EDAMP.WhileRunning && ~app.EDAMP.setPause
-                app.EDAMP.isRunning = true;
-                app.output_array = app.EDAMP.frameAcquisition();
+                tic
+                app.EDAMP.extractFrames();
+                app.output_array = app.EDAMP.constructBuffer();
+                
+                preprocessedBuffer = zeros(23, 500);
+                for i = 1:23
+                    sensorData = app.output_array(i, :);
+
+                    detrended_data = detrend(sensorData);
+
+                    minVal = min(detrended_data);
+                    maxVal = max(detrended_data);
+                    plotRange = maxVal - minVal;
+
+                    rescaledData = (detrended_data - minVal) / plotRange;
+
+                    preprocessedBuffer(i, :) = rescaledData;
+                end
+
+                fs = 500;
+                cutFreq = 45; 
+                filterOrder = 3;
+                passband_ripple = 0.5;
+                Wn = (2 * cutFreq) / fs; 
+                [bL, aL] = cheby1(filterOrder, passband_ripple, Wn, 'low');
+
+                sectionSize = 500; 
+                out = zeros(size(preprocessedBuffer));               
+
+                for i = 0:size(preprocessedBuffer, 2) / sectionSize - 1
+                    range = i * sectionSize + 1 : (i + 1) * sectionSize; 
+                    in = preprocessedBuffer(:, range);
+                    [out(:, range), app.zf] = filter(bL, aL, in, app.zf, 2);
+                end
+
+                output = out;
 
                 if ~app.saved_flag
-                    app.step = max(app.output_array(:));
+                    app.step = max(output(:));
                     app.distancesBetweenChannels = 0:app.step:app.step*22;
                     app.distancesBetweenChannels = app.distancesBetweenChannels';
                     app.saved_flag = true;
                 end
-                
-                tic
-                app.newBuffer = app.output_array + app.distancesBetweenChannels;
+
+                app.newBuffer = output + app.distancesBetweenChannels;
                 app.displayBuffer(:, 1:500) = app.newBuffer;
                 app.displayBuffer = circshift(app.displayBuffer, [0, -500]);
-                
-                % app.displayBuffer = [app.displayBuffer, app.newBuffer];
-                % 
-                % if size(app.displayBuffer, 2) > 1500
-                %     app.displayBuffer = app.displayBuffer(:, end-1500:end);
-                % end
-                
-                pause(0.8);
+
+                pause(0.6);
                 plot(app.UIAxes, app.displayBuffer');
                 yticks(app.UIAxes, app.distancesBetweenChannels);
                 yticklabels(app.UIAxes, variables);
@@ -107,7 +126,6 @@ classdef UI_exported < matlab.apps.AppBase
                 end
                 toc
                 pause(0.1);
-                % app.output_array = [];
             end
         end
 
@@ -121,27 +139,15 @@ classdef UI_exported < matlab.apps.AppBase
             ImpedanceValuesUI = src.ImpedanceValues;
             colors = zeros(size(app.Sensors, 1), 3); 
 
-            % for i = 1:size(app.Sensors, 1)
-            %     if i <= numel(app.EDAMP.ImpedanceValues) && app.EDAMP.ImpedanceValues(i) < 2500
-            %         colors(i, :) = [0, 0.5, 0];  % Dark green
-            %     elseif i <= numel(app.EDAMP.ImpedanceValues) && app.EDAMP.ImpedanceValues(i) > 5000
-            %         colors(i, :) = [1, 0, 0];  % Red
-            %     else
-            %         colors(i, :) = [0.5, 0.8, 0.5];  % Light green
-            %     end
-            % end
-
-            % Define conditions
-            condition1 = ImpedanceValuesUI < 2500;
-            condition2 = ImpedanceValuesUI > 5000;
-
-            % Set colors based on conditions
-            colors(condition1, :) = [0, 0.5, 0];  % Dark green
-            colors(condition2, :) = [1, 0, 0];    % Red
-
-            % Default color (light green)
-            default_color = [0.5, 0.8, 0.5];
-            colors(~(condition1 | condition2), :) = default_color;
+            for i = 1:size(app.Sensors, 1)
+                if i <= numel(ImpedanceValuesUI) && ImpedanceValuesUI(i) < 2500
+                    colors(i, :) = [0, 0.5, 0];  % Dark green
+                elseif i <= numel(ImpedanceValuesUI) && ImpedanceValuesUI(i) > 5000
+                    colors(i, :) = [1, 0, 0];  % Red
+                else
+                    colors(i, :) = [0.5, 0.8, 0.5];  % Light green
+                end
+            end
 
             scatter(app.UIAxes2, app.Sensors(:, 1), app.Sensors(:, 2), 200, colors, 'filled');
 
@@ -152,7 +158,7 @@ classdef UI_exported < matlab.apps.AppBase
             xlim(app.UIAxes2, [0 1]);
             ylim(app.UIAxes2, [0 1]);
         end
-
+        
         function clearAxis (app)
             % this function clears the plot responsible for displaying
             % the impedances
@@ -160,7 +166,6 @@ classdef UI_exported < matlab.apps.AppBase
             colors = [0.5, 0.5, 0.5];
             scatter(app.UIAxes2, app.Sensors(:, 1), app.Sensors(:, 2), 200, colors, 'filled');
         end
-
     end
 
     % Callbacks that handle component events
@@ -168,38 +173,8 @@ classdef UI_exported < matlab.apps.AppBase
 
         % Button pushed function: MakeConnectionButton
         function MakeConnectionButtonPushed(app, event)
-            % % Get a list of available serial ports
-            % ports = serialportlist("all");
-            % 
-            % % Initialize a flag to check if the USB drive was found
-            % usbDriveFound = false;
-            % 
-            % % Initialize the port name variable
-            % usbPortName = '';
-            % 
-            % % Define a function to check if a port is valid
-            % checkPort = @(port) fopen(serialport(port, 'BaudRate', 3000000), 'Status');
-            % 
-            % % Use arrayfun to apply the checkPort function to all ports
-            % portStatus = arrayfun(checkPort, ports);
-            % 
-            % % Find the first valid port
-            % index = find(portStatus, 1);
-            % 
-            % if ~isempty(index)
-            %     usbDriveFound = true;
-            %     usbPortName = ports{index};
-            % end
-            % 
-            % if usbDriveFound
-            %     disp(['USB Drive found on port: ' usbPortName]);
-            % else
-            %     disp('USB Drive not found.');
-            % end
-            
-            %   HERE IS WHERE YOU INSERT THE PORT NAME MANUALLY -> usbPortName
-            if isempty(app.EDAMP) || ~isa(app.EDAMP, 'EDAM') || ~app.EDAMP.portInitialized
-                app.EDAMP = EDAM("COM3"); ..."COM3"
+            if isempty(app.EDAMP) || ~isa(app.EDAMP, 'MyClass5') || ~app.EDAMP.portInitialized
+                app.EDAMP = MyClass5('data5.mat');
             end
 
             set(app.StartAcquisitionButton, 'Enable', 'on')
@@ -222,7 +197,7 @@ classdef UI_exported < matlab.apps.AppBase
             set(app.PauseAcquisitionButton, 'Enable', 'on')
             set(app.ImpedancesoffButton, 'Enable', 'on')
             set(app.StartAcquisitionButton, 'Enable', 'off')
-            
+
             if isempty(app.EDAMP) || ~isa(app.EDAMP, 'EDAM') || ~app.EDAMP.portInitialized
                 app.EDAMP = EDAM("COM3"); ..."COM3"
             end
@@ -236,14 +211,12 @@ classdef UI_exported < matlab.apps.AppBase
             else
                 disp('Frame acquisition is already running.');
             end
-
-            
         end
 
         % Button pushed function: ImpedancesonButton
         function ImpedancesonButtonPushed(app, event)
             app.EDAMP.ImpedancesOn();
-
+            
             set(app.ImpedancesoffButton, 'Enable', 'on')
             set(app.ImpedancesonButton, 'Enable', 'off')
         end
@@ -268,9 +241,10 @@ classdef UI_exported < matlab.apps.AppBase
 
         % Button pushed function: ImpedancesoffButton
         function ImpedancesoffButtonPushed(app, event)
-            app.EDAMP.ImpedancesOff();
-            app.clearAxis();
 
+            app.clearAxis();
+            app.EDAMP.ImpedancesOff();
+            
             set(app.ImpedancesonButton, 'Enable', 'on')
             set(app.ImpedancesoffButton, 'Enable', 'off')
         end
