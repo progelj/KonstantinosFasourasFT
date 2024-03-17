@@ -1,4 +1,4 @@
-classdef EDAM_BreakDown < handle
+classdef EDAM < handle
     %UNTITLED Summary of this class goes here
     %   Detailed explanation goes here
     events
@@ -25,7 +25,7 @@ classdef EDAM_BreakDown < handle
     end
 
     methods
-        function obj = EDAM_BreakDown(portName)
+        function obj = EDAM(portName)
             %UNTITLED Construct an instance of this class
             %   Detailed explanation goes here
             obj.portInitialized = false;
