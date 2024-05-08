@@ -1,4 +1,4 @@
-classdef EDAM_BreakDown < handle
+classdef EDAM < handle
     %UNTITLED Summary of this class goes here
     %   Detailed explanation goes here
     events
@@ -7,27 +7,22 @@ classdef EDAM_BreakDown < handle
 
     properties
         portInitialized = false;
-        serial_port = [];
-        setPause = false;
-        isRunning = false;
+        serialPort = [];
+        StopProcess = false;
         WhileRunning = false;
         oneSecondBuffer = zeros(1,37500);
         counter = 0;
         idx
         idx2
-        getImpedances = false;
+        impedances = false;
         ImpedanceValues
         makeBuffer
-        subtract
-        save_flag = false;
         result = [];
         zf = [];
     end
 
     methods
-        function obj = EDAM_BreakDown(portName)
-            %UNTITLED Construct an instance of this class
-            %   Detailed explanation goes here
+        function obj = EDAM(portName)
             obj.portInitialized = false;
 
             if nargin > 0
@@ -36,10 +31,8 @@ classdef EDAM_BreakDown < handle
         end
 
         function obj = initializePort(obj, portName)
-            %METHOD1 Summary of this method goes here
-            %   Detailed explanation goes here
-            if isempty(obj.serial_port)
-                obj.serial_port = serialport(portName, 3000000, "Timeout", 10);
+            if isempty(obj.serialPort)
+                obj.serialPort = serialport(portName, 3000000, "Timeout", 10);
                 disp("Serial port object created successfully");
                 obj.startOfFrame();
             else
@@ -48,19 +41,19 @@ classdef EDAM_BreakDown < handle
         end
 
         function obj = ImpedancesOn(obj)
-            write(obj.serial_port, 17, "uint8")
-            obj.getImpedances = true;
+            write(obj.serialPort, 17, "uint8")
+            obj.impedances = true;
         end
 
         function obj = ImpedancesOff(obj)
-            write(obj.serial_port, 18, "uint8")
-            obj.getImpedances = false;
+            write(obj.serialPort, 18, "uint8")
+            obj.impedances = false;
         end
         
         function obj = startOfFrame(obj)
             obj.flushSerialPort();
             % get start of frame
-            data2 = read(obj.serial_port, 100, "uint8");
+            data2 = read(obj.serialPort, 100, "uint8");
             ind = find(data2 == 255);
             % check if frame is of correct format
             if size(ind,2) == 1
@@ -69,21 +62,21 @@ classdef EDAM_BreakDown < handle
                 if(get_reminder<0)
                     get_reminder = 75+get_reminder;
                 end
-                read(obj.serial_port, get_reminder, "uint8");
+                read(obj.serialPort, get_reminder, "uint8");
             elseif size(ind,2) > 1
                 rem = ind(2);
                 get_reminder = 75 - rem-1;
                 if(get_reminder<0)
                     get_reminder = 75+get_reminder;
                 end
-                read(obj.serial_port, get_reminder, "uint8");
+                read(obj.serialPort, get_reminder, "uint8");
             end
             obj.portInitialized = true;
             disp("Port initialized successfully");
         end
 
         function flushSerialPort(obj)
-            flush(obj.serial_port);
+            flush(obj.serialPort);
         end
 
         function obj = extractFrames(obj)
@@ -91,10 +84,10 @@ classdef EDAM_BreakDown < handle
             if obj.portInitialized
                 obj.oneSecondBuffer = zeros(1,37500);
                 while obj.oneSecondBuffer(1,1) == 0
-                    if isempty(obj.serial_port) || ~isvalid(obj.serial_port)
+                    if isempty(obj.serialPort) || ~isvalid(obj.serialPort)
                         error('Serial port object is not valid or properly initialized.');
                     end
-                    oneFrame = read(obj.serial_port, 75, "uint8");
+                    oneFrame = read(obj.serialPort, 75, "uint8");
                     % we store the data for later investigation
                     FrameRecorder{obj.counter+1} = {oneFrame};
                     obj.counter = obj.counter + 1;
@@ -106,7 +99,7 @@ classdef EDAM_BreakDown < handle
                         obj.oneSecondBuffer = circshift(obj.oneSecondBuffer, [0, -75]);
                     elseif (oneFrame(1) ~= 255 && size(obj.idx,2) == 1 )
                         grr = obj.idx-1;
-                        garb = read(obj.serial_port, grr, "uint8");
+                        garb = read(obj.serialPort, grr, "uint8");
                         FrameRecorder{obj.counter+1} = {garb};
                         obj.counter = obj.counter + 1;
                     else
@@ -127,23 +120,34 @@ classdef EDAM_BreakDown < handle
 
         function output_array = constructBuffer(obj)
             obj.makeBuffer = obj.make_buffer(obj.oneSecondBuffer);
-            if ~obj.save_flag
-                obj.subtract = obj.makeBuffer(:,1);
-                obj.save_flag = true;
-            end
-            obj.result = obj.makeBuffer - obj.subtract;
             
-            if obj.getImpedances
+            obj.result = obj.makeBuffer; 
+            
+            if obj.impedances
                 obj.extractImpedances();
                 notify(obj, 'ImpedanceDataEvent');
-                output_array = obj.ImpOnFilters();
-            elseif ~obj.getImpedances
-                output_array = obj.ImpOffNoFilters();
+                output_array = obj.ImpedancesOnFinalOutput();
+            elseif ~obj.impedances
+                output_array = obj.ImpedancesOffFinalOutput();
             end
         end
 
-        function output = ImpOffNoFilters(obj)
-            output = obj.result;
+        function output = ImpedancesOffFinalOutput(obj)
+            cutFreq = 0.5; 
+            filterOrder = 3;
+            Wn = (2*cutFreq)/500; 
+            [bL,aL] = butter(filterOrder, Wn, 'high');
+
+            sectionSize=500;
+            out=zeros(size(obj.result));
+
+            for i=0:size(obj.result,2)/sectionSize-1
+                range=i*500+1:(i+1)*500;
+                in=obj.result(:,range);
+                [out(:,range),obj.zf] = filter(bL,aL,in,obj.zf,2);
+            end
+
+            output = out;
         end
 
         function obj = extractImpedances(obj)
@@ -158,36 +162,37 @@ classdef EDAM_BreakDown < handle
             obj.ImpedanceValues = obj.ImpedanceValues(1:end-2);
         end
 
-        function output = ImpOnFilters(obj)
+        function output = ImpedancesOnFinalOutput(obj)
+            firstFiterArray = filter([0.85, 0, 0.85], [1, 0, 0.7], obj.result, [], 2);
+            secondFiterArray = filter([0.8, 0.8], [1, 0.6], firstFiterArray, [], 2);
+
             cutFreq = 0.5; 
             filterOrder = 3;
             Wn = (2*cutFreq)/500; 
             [bL,aL] = butter(filterOrder, Wn, 'high');
 
             sectionSize=500;
-            out=zeros(size(obj.result));
+            out=zeros(size(secondFiterArray));
 
-            for i=0:size(obj.result,2)/sectionSize-1
+            for i=0:size(secondFiterArray,2)/sectionSize-1
                 range=i*500+1:(i+1)*500;
-                in=obj.result(:,range);
+                in=secondFiterArray(:,range);
                 [out(:,range),obj.zf] = filter(bL,aL,in,obj.zf,2);
             end
-            % data2 = filter(bL, aL, obj.result, [], 2);
+            
             output = out;
         end
 
-        function obj = pauseAcquisition(obj)
-            obj.setPause = true;
+        function obj = stopAcquisition(obj)
+            obj.StopProcess = true;
+            
         end
 
         function delete(obj)
-            delete(obj.serial_port);
+            delete(obj.serialPort);
         end
 
         function mb = make_buffer(obj, A)
-            % this method gets the extracted data from the eeg device ad
-            % constructs the channels.
-            
             Data = uint8(A);
             starts = find(Data == 255);
             b0 = starts(1:end);
@@ -216,12 +221,11 @@ classdef EDAM_BreakDown < handle
                 channel_data(CH, :) = B * 5 / 3 * 2^(-32);
             end
             if Data(72) == 18
-                obj.getImpedances = false;
+                obj.impedances = false;
             else
-                obj.getImpedances = true;
+                obj.impedances = true;
             end
             mb=channel_data;
-
         end
 
     end

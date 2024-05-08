@@ -5,7 +5,7 @@ classdef EDAM_storedData_breakdown < handle
     properties
         dataInitialized = false;
         WhileRunning = false;
-        setPause = false;
+        StopProcess = false;
         getImpedances = false;
         ImpedanceValues
         recorded_data = [];
@@ -16,7 +16,6 @@ classdef EDAM_storedData_breakdown < handle
         save_flag = false;
         subtract
         bufferArray = [];
-        % ALLDATA = [];
         idx
         idx2
         frameCounter = [];
@@ -37,7 +36,6 @@ classdef EDAM_storedData_breakdown < handle
             if isempty(obj.recorded_data)
                 obj.recorded_data = load(fileName);
                 obj.dataInitialized = true;
-                % disp(obj.recorded_data)
 
                 obj.ind = find(obj.recorded_data.data == 255, 1);
                 obj.check = obj.recorded_data.data(obj.ind+71);
@@ -93,18 +91,14 @@ classdef EDAM_storedData_breakdown < handle
                     obj.ind = obj.ind + 75;
                 end
             end
-            % obj.ALLDATA = [obj.ALLDATA, obj.bufferArray];
             toc
         end
-
+        
         function output_array = constructBuffer(obj)
             if size(obj.bufferArray, 2) == 37500
                 obj.makeBuffer = obj.make_buffer(obj.bufferArray);
-                if ~obj.save_flag
-                    obj.subtract = obj.makeBuffer(:,1);
-                    obj.save_flag = true;
-                end
-                obj.result = obj.makeBuffer - obj.subtract;
+                
+                obj.result = obj.makeBuffer; 
             else
                 disp("error in constructBuffer")
             end
@@ -120,7 +114,21 @@ classdef EDAM_storedData_breakdown < handle
         end
 
         function output = ImpOffNoFilters(obj)
-            output = obj.result;
+            cutFreq = 0.5; 
+            filterOrder = 3;
+            Wn = (2*cutFreq)/500; 
+            [bL,aL] = butter(filterOrder, Wn, 'high');
+
+            sectionSize=500;
+            out=zeros(size(obj.result));
+
+            for i=0:size(obj.result,2)/sectionSize-1
+                range=i*500+1:(i+1)*500;
+                in=obj.result(:,range);
+                [out(:,range),obj.zf] = filter(bL,aL,in,obj.zf,2);
+            end
+            output = out;
+            
         end
 
         function obj = extractImpedances(obj)
@@ -136,25 +144,29 @@ classdef EDAM_storedData_breakdown < handle
         end
 
         function output = ImpOnFilters(obj)
+
+            firstFiterArray = filter([0.85, 0, 0.85], [1, 0, 0.7], obj.result, [], 2);
+            secondFiterArray = filter([0.8, 0.8], [1, 0.6], firstFiterArray, [], 2);
+                        
             cutFreq = 0.5; 
             filterOrder = 3;
             Wn = (2*cutFreq)/500; 
             [bL,aL] = butter(filterOrder, Wn, 'high');
 
             sectionSize=500;
-            out=zeros(size(obj.result));
+            out=zeros(size(secondFiterArray));
             
-            for i=0:size(obj.result,2)/sectionSize-1
+            for i=0:size(secondFiterArray,2)/sectionSize-1
                 range=i*500+1:(i+1)*500;
-                in=obj.result(:,range);
+                in=secondFiterArray(:,range);
                 [out(:,range),obj.zf] = filter(bL,aL,in,obj.zf,2);
             end
-            % data2 = filter(bL, aL, obj.result, [], 2);
             output = out;
         end
 
-        function pauseAcquisition(obj)
-            obj.setPause = true;
+        function stopAcquisition(obj)
+            obj.StopProcess = false;
+            
         end
 
         function ImpOn(obj)
@@ -196,7 +208,6 @@ classdef EDAM_storedData_breakdown < handle
                 channel_data(CH, :) = B * 5 / 3 * 2^(-32);
             end
             mb=channel_data;
-
         end
     end
 end
