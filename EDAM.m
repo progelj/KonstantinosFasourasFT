@@ -1,6 +1,5 @@
-classdef EDAM < handle
-    %UNTITLED Summary of this class goes here
-    %   Detailed explanation goes here
+classdef EDAM_BreakDown < handle
+    
     events
         ImpedanceDataEvent
     end
